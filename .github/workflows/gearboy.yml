@@ -220,6 +220,7 @@ jobs:
         architecture: [x64, arm64]
     runs-on: windows-latest
     permissions:
+      actions: read
       contents: read
       packages: write
     steps:
@@ -249,6 +250,30 @@ jobs:
     - name: msbuild
       run: msbuild ${{ env.NAME_UPPER }}.sln /t:Clean,Build /p:EmulatorBuild="${{ env.BUILD_NUMBER }}" /p:Configuration=Release /p:Platform=${{ matrix.architecture }} /p:PreferredToolArchitecture=x64
       working-directory: platforms/windows
+    # Keep the unsigned artifact outside the release job's Gearboy-* download pattern.
+    - name: Upload unsigned executable for SignPath
+      if: github.event_name != 'pull_request' && github.repository == 'drhelius/Gearboy'
+      id: upload-unsigned-executable
+      uses: actions/upload-artifact@v7
+      with:
+        name: unsigned-${{ env.NAME_UPPER }}-${{ env.BUILD_NUMBER }}-windows-${{ matrix.architecture }}
+        path: platforms/windows/release/${{ env.NAME_UPPER }}.exe
+        if-no-files-found: error
+    - name: Test sign executable with SignPath
+      if: github.event_name != 'pull_request' && github.repository == 'drhelius/Gearboy'
+      uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
+      with:
+        api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+        organization-id: e0fd1896-f6db-4b1f-86fd-382c40b5a129
+        project-slug: Gearboy
+        signing-policy-slug: test-signing
+        # The default SignPath artifact configuration must sign Gearboy.exe inside a <zip-file>.
+        github-artifact-id: ${{ steps.upload-unsigned-executable.outputs.artifact-id }}
+        wait-for-completion: true
+        output-artifact-directory: signed
+    - name: Use signed executable
+      if: github.event_name != 'pull_request' && github.repository == 'drhelius/Gearboy'
+      run: Copy-Item "signed/${{ env.NAME_UPPER }}.exe" "platforms/windows/release/${{ env.NAME_UPPER }}.exe" -Force
     - name: Prepare artifact directory
       run: |
         mkdir -p artifact/mcp
